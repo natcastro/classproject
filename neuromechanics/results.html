@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Experiment Results</title>
+    <style>
+        :root {
+            --primary-color: #007AFF;
+            --background-color: #F2F2F7;
+            --surface-color: #FFFFFF;
+            --text-color: #1C1C1E;
+            --secondary-text: #8E8E93;
+            --font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            font-family: var(--font-family);
+            background-color: var(--background-color);
+            margin: 0;
+            padding: 20px;
+            color: var(--text-color);
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: var(--surface-color);
+            border-radius: 16px;
+            padding: 16px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .card h3 {
+            margin: 0 0 10px 0;
+            font-size: 16px;
+            color: var(--secondary-text);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .canvas-wrapper {
+            width: 100%;
+            aspect-ratio: 4/3;
+            position: relative;
+            background: #FAFAFA;
+            border-radius: 8px;
+            border: 1px solid #E5E5EA;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .actions {
+            margin-top: 40px;
+            text-align: center;
+        }
+
+        .btn {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn:hover {
+            opacity: 0.9;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>Experiment Results</h1>
+
+    <div class="grid" id="resultsGrid">
+        <!-- Cards will be injected here -->
+    </div>
+
+    <div
+        style="max-width: 800px; margin: 40px auto; background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); display: flex; flex-direction: column; gap: 40px;">
+        <div>
+            <h2 style="text-align:center; margin-top:0;">Initial Angular Error</h2>
+            <canvas id="chartCanvas" width="760" height="250" style="width:100%; height:auto;"></canvas>
+        </div>
+        <hr style="border: 0; border-top: 1px solid #EEE;">
+        <div>
+            <h2 style="text-align:center; margin-top:0;">Geometric Error (Distance to Model)</h2>
+            <canvas id="geoCanvas" width="760" height="250" style="width:100%; height:auto;"></canvas>
+        </div>
+        <hr style="border: 0; border-top: 1px solid #EEE;">
+        <div>
+            <h2 style="text-align:center; margin-top:0;">Completion Time (Duration)</h2>
+            <canvas id="timeCanvas" width="760" height="250" style="width:100%; height:auto;"></canvas>
+        </div>
+        <hr style="border: 0; border-top: 1px solid #EEE;">
+        <div>
+            <h2 style="text-align:center; margin-top:0;">Smoothness (Speed Peaks)</h2>
+            <canvas id="peaksCanvas" width="760" height="250" style="width:100%; height:auto;"></canvas>
+        </div>
+    </div>
+
+    <div class="actions" style="display: flex; justify-content: center; gap: 20px;">
+        <button id="downloadBtn" class="btn" style="background-color: #34C759;">Download Data (CSV)</button>
+        <a href="index.html" class="btn">Start New Experiment</a>
+    </div>
+
+    <script>
+        const STAGES = [
+            { id: 1, label: 'Stage 1: Baseline' },
+            { id: 2, label: 'Stage 2: Perturbation 1' },
+            { id: 3, label: 'Stage 3: Perturbation 2' },
+            { id: 4, label: 'Stage 4: Perturbation 3' },
+            { id: 5, label: 'Stage 5: Aftereffect' }
+        ];
+
+        /* --- Minimal Renderer for Replay --- */
+        class MiniRenderer {
+            constructor(canvas) {
+                this.canvas = canvas;
+                this.ctx = canvas.getContext("2d");
+
+                // Get container size
+                const rect = canvas.parentElement.getBoundingClientRect();
+                const dpr = window.devicePixelRatio || 1;
+
+                this.width = rect.width;
+                this.height = rect.height;
+
+                canvas.width = this.width * dpr;
+                canvas.height = this.height * dpr;
+
+                this.ctx.scale(dpr, dpr);
+                this.ctx.lineCap = "round";
+                this.ctx.lineJoin = "round";
+
+                this.drawHouseGuide();
+            }
+
+            drawHouseGuide() {
+                const w = this.width * 0.4; // Slightly larger relative to mini card
+                const h = this.height * 0.4;
+                const x = (this.width - w) / 2;
+                const y = (this.height - h) / 2 + (h * 0.1);
+
+                this.ctx.save();
+                this.ctx.strokeStyle = "rgba(0, 0, 0, 0.1)";
+                this.ctx.lineWidth = 3;
+                this.ctx.beginPath();
+                this.ctx.rect(x, y + h * 0.35, w, h * 0.65);
+                this.ctx.moveTo(x - 15, y + h * 0.35);
+                this.ctx.lineTo(x + w / 2, y);
+                this.ctx.lineTo(x + w + 15, y + h * 0.35);
+                this.ctx.stroke();
+                this.ctx.restore();
+            }
+
+            drawPath(points, originalWidth, originalHeight) {
+                if (!points || points.length < 2) return;
+
+                // Calculate Scale Factors
+                // If original dimensions are missing (legacy data), assume 1:1 (might look bad but better than error)
+                const scaleX = originalWidth ? (this.width / originalWidth) : 0.3; // Default fallback roughly for ipad
+                const scaleY = originalHeight ? (this.height / originalHeight) : 0.3;
+
+                const scale = Math.min(scaleX, scaleY); // Keep aspect ratio
+
+                // Offsets to center it if aspect ratios differ
+                const offX = originalWidth ? (this.width - originalWidth * scale) / 2 : 0;
+                const offY = originalHeight ? (this.height - originalHeight * scale) / 2 : 0;
+
+                this.ctx.save();
+                this.ctx.translate(offX, offY);
+                this.ctx.scale(scale, scale);
+
+                // Set Styles BEFORE drawing
+                this.ctx.lineWidth = 3 / scale;
+                this.ctx.strokeStyle = "#007AFF";
+                this.ctx.lineCap = "round";
+                this.ctx.lineJoin = "round";
+
+                this.ctx.beginPath();
+
+                // Start
+                this.ctx.moveTo(points[0].drawX, points[0].drawY);
+
+                for (let i = 1; i < points.length; i++) {
+                    const p = points[i];
+                    // Break path if strokeId changes
+                    if (p.strokeId !== points[i - 1].strokeId) {
+                        this.ctx.stroke();
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(p.drawX, p.drawY);
+                    } else {
+                        this.ctx.lineTo(p.drawX, p.drawY);
+                    }
+                }
+
+                this.ctx.stroke(); // Draw final stroke
+                this.ctx.restore();
+            }
+        }
+
+        // Initialize
+        function init() {
+            const rawData = localStorage.getItem('visuomotor_experiment_data');
+            if (!rawData) {
+                document.getElementById('resultsGrid').innerHTML = '<p style="text-align:center; width:100%;">No data found.</p>';
+                return;
+            }
+
+            let dataLogs = [];
+            let origW = 0;
+            let origH = 0;
+
+            try {
+                const parsed = JSON.parse(rawData);
+                if (Array.isArray(parsed)) {
+                    // Legacy Format
+                    dataLogs = parsed;
+                } else {
+                    // New Format with Dimensions
+                    dataLogs = parsed.logs;
+                    origW = parsed.width;
+                    origH = parsed.height;
+                }
+            } catch (e) {
+                console.error("Error parsing data", e);
+                return;
+            }
+
+            const grid = document.getElementById('resultsGrid');
+
+            STAGES.forEach(stage => {
+                // Filter data for this stage
+                const stagePoints = dataLogs.filter(d => d.stage === stage.id);
+
+                // Create Card
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.innerHTML = `
+                    <h3>${stage.label}</h3>
+                    <div class="canvas-wrapper">
+                        <canvas id="c-${stage.id}"></canvas>
+                    </div>
+                `;
+                grid.appendChild(card);
+
+                // Render
+                setTimeout(() => {
+                    const canvas = document.getElementById(`c-${stage.id}`);
+                    if (canvas && stagePoints.length > 0) {
+                        const renderer = new MiniRenderer(canvas);
+                        renderer.drawPath(stagePoints, origW, origH);
+                    } else if (canvas) {
+                        const renderer = new MiniRenderer(canvas); // Just draw guide
+                    }
+                }, 100);
+            });
+
+            // --- Angular Error Analysis ---
+            calculateAndDrawCharts(dataLogs, origW, origH);
+        }
+
+        function calculateAndDrawCharts(dataLogs, w, h) {
+            // --- 1. Angular Error (Learning Curve) ---
+            // 1. Define Ideal Vector (Bottom Left -> Bottom Right of House)
+            // Re-calculate house coordinates based on saved dimensions
+            const hw = w * 0.35;
+            const hh = h * 0.35;
+            const hx = (w - hw) / 2;
+            const hy = (h - hh) / 2 + (hh * 0.1);
+
+            const startX = hx;
+            const startY = hy + hh;
+            const endX = hx + hw;
+            const endY = hy + hh;
+
+            const idealAngle = Math.atan2(endY - startY, endX - startX); // Should be 0 (Horizontal)
+
+            const angularErrors = STAGES.map(stage => {
+                const points = dataLogs.filter(d => d.stage === stage.id);
+                if (points.length < 5) return 0; // Not enough data
+
+                // Find start (first point)
+                const p0 = points[0];
+
+                // Find point at ~10% distance or fixed pixels to determine "Initial" vector
+                // Let's take the point that is ~50px away from start
+                let pVec = points[points.length - 1]; // Fallback
+                for (let p of points) {
+                    const dist = Math.hypot(p.drawX - p0.drawX, p.drawY - p0.drawY);
+                    if (dist > 30) { // 30px threshold for initial vector
+                        pVec = p;
+                        break;
+                    }
+                }
+
+                // Actual Angle
+                // Note: We use drawX/Y because that's what the user sees (feedback)
+                // Or should we use realX/Y (hand)? 
+                // "Initial Direction Error" usually refers to HAND direction error relative to target in perturbation studies.
+                // If the cursor is perturbed, the user moves hand to compensate.
+                // If we want to show *adaptation*, we measure Hand Angle.
+                // Baseline: Hand = Cursor. Error ~ 0.
+                // Perturbation (Early): Hand goes straight (0 deg), Cursor goes 30 deg. User sees error.
+                // Perturbation (Late): Hand goes -30 deg to make Cursor go 0 deg.
+                // So "Error" defined as: Target - Cursor? Or Target - Hand?
+                // The user asked for "vector of their actual first movement segment".
+                // Let's use Real Hand coordinates (`realX`, `realY`) to show the adaptation mechanism.
+                // Ideal Hand Trajectory for Baseline: 0 deg.
+                // Ideal Hand Trajectory for Perturbation: -30 deg (to counteract).
+                // BUT, "Initial Direction Error" is usually defined as (Target Angle - Actual Hand Angle).
+                // In early adaptation, Error is large. In late adaptation, Error is small.
+                // Wait, if Target is 0, and Hand is 0, Error is 0. But Cursor is rotated 30.
+                // If User adapts, Hand is -30. Target is 0. Error is 30?
+                // Usually "Error" is regarding the TASK goal. The Task is Visual.
+                // So we compare Visual Cursor Angle vs Target Angle.
+                // Early Perturb: Cursor goes 30 deg. Target 0. Error = 30.
+                // Late Perturb: Cursor goes 0 deg. Target 0. Error = 0.
+                // THIS produces the decay curve. So we must use `drawX`/`drawY` (Visual Feedback).
+
+                const actualAngle = Math.atan2(pVec.drawY - p0.drawY, pVec.drawX - p0.drawX);
+
+                let errorDeg = (actualAngle - idealAngle) * (180 / Math.PI);
+
+                // Normalize error (absolute value)
+                return Math.abs(errorDeg);
+            });
+
+            drawChart('chartCanvas', angularErrors, '°', 'Initial Angular Error');
+
+            // --- 2. Geometric Error (Distance to Model) ---
+            // Define House Segments
+            const segments = [
+                // Rect (Bottom, Top, Left, Right)
+                { x1: hx, y1: hy + hh, x2: hx + hw, y2: hy + hh }, // Bottom
+                { x1: hx, y1: hy + hh * 0.35, x2: hx + hw, y2: hy + hh * 0.35 }, // Top of rect / Base of roof
+                { x1: hx, y1: hy + hh * 0.35, x2: hx, y2: hy + hh }, // Left
+                { x1: hx + hw, y1: hy + hh * 0.35, x2: hx + hw, y2: hy + hh }, // Right
+                // Roof
+                { x1: hx - 20, y1: hy + hh * 0.35, x2: hx + hw / 2, y2: hy }, // Roof Left
+                { x1: hx + hw / 2, y1: hy, x2: hx + hw + 20, y2: hy + hh * 0.35 } // Roof Right
+            ];
+
+            const geometricErrors = STAGES.map(stage => {
+                const points = dataLogs.filter(d => d.stage === stage.id);
+                if (points.length < 2) return { avg: 0, max: 0 };
+
+                let totalDist = 0;
+                let maxDist = 0;
+
+                points.forEach(p => {
+                    let minDist = Infinity;
+                    // Find distance to closest segment
+                    for (let seg of segments) {
+                        const d = distToSegment(p.drawX, p.drawY, seg.x1, seg.y1, seg.x2, seg.y2);
+                        if (d < minDist) minDist = d;
+                    }
+                    totalDist += minDist;
+                    if (minDist > maxDist) maxDist = minDist;
+                });
+
+                return {
+                    avg: totalDist / points.length,
+                    max: maxDist
+                };
+            });
+
+            // Draw Geometric Chart (Avg vs Max)
+            drawGeometricChart('geoCanvas', geometricErrors);
+
+            // --- 3. Completion Time (Duration) ---
+            const timeData = STAGES.map(stage => {
+                const points = dataLogs.filter(d => parseInt(d.stage) === stage.id);
+                if (points.length < 2) return 0;
+
+                const start = parseFloat(points[0].timestamp);
+                const end = parseFloat(points[points.length - 1].timestamp);
+
+                // Duration in Seconds
+                return (end - start) / 1000;
+            });
+
+            drawChart('timeCanvas', timeData, 's', 'Completion Time (seconds)');
+
+            // --- 4. Smoothness (Speed Peaks) ---
+            const peakData = STAGES.map(stage => {
+                const points = dataLogs.filter(d => parseInt(d.stage) === stage.id);
+                if (points.length < 2) return 0;
+
+                // Group by strokeId
+                const strokes = {};
+                points.forEach(p => {
+                    const sId = p.strokeId;
+                    if (!strokes[sId]) strokes[sId] = [];
+                    strokes[sId].push(p);
+                });
+
+                let totalPeaks = 0;
+
+                Object.values(strokes).forEach(strokePoints => {
+                    if (strokePoints.length < 3) return;
+
+                    // Calculate Velocities
+                    const velocities = [];
+                    for (let i = 1; i < strokePoints.length; i++) {
+                        const p1 = strokePoints[i - 1];
+                        const p2 = strokePoints[i];
+                        const dist = Math.hypot(parseFloat(p2.drawX) - parseFloat(p1.drawX), parseFloat(p2.drawY) - parseFloat(p1.drawY));
+
+                        // Parse Int for safety
+                        const t1 = parseFloat(p1.timestamp);
+                        const t2 = parseFloat(p2.timestamp);
+                        const dt = t2 - t1;
+
+                        if (dt > 0 && dist > 0) {
+                            velocities.push(dist / dt); // px/ms
+                        } else {
+                            velocities.push(velocities.length > 0 ? velocities[velocities.length - 1] : 0);
+                        }
+                    }
+
+                    // Smooth velocity (Simple Moving Average)
+                    const smoothed = [];
+                    for (let i = 0; i < velocities.length; i++) {
+                        let sum = 0;
+                        let count = 0;
+                        for (let j = i - 2; j <= i + 2; j++) { // Wider window (5)
+                            if (velocities[j] !== undefined) {
+                                sum += velocities[j];
+                                count++;
+                            }
+                        }
+                        smoothed.push(sum / count);
+                    }
+
+                    // Count Peaks
+                    // Threshold: 0.05 px/ms is reasonable for "stop" vs "go". 
+                    // To find real "jolts", maybe slightly higher or check spread.
+                    // But user asks for "changes in the speed".
+                    const threshold = 0.02; // Lower threshold to catch subtle changes
+
+                    for (let i = 1; i < smoothed.length - 1; i++) {
+                        if (smoothed[i] > smoothed[i - 1] &&
+                            smoothed[i] > smoothed[i + 1] &&
+                            smoothed[i] > threshold) {
+                            totalPeaks++;
+                        }
+                    }
+                });
+
+                return totalPeaks;
+            });
+
+            drawChart('peaksCanvas', peakData, '', 'Total Speed Peaks (Count)');
+        }
+
+        // Helper: Point to Line Segment Distance
+        function distToSegment(px, py, x1, y1, x2, y2) {
+            const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
+            if (l2 === 0) return Math.hypot(px - x1, py - y1);
+            let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+            t = Math.max(0, Math.min(1, t));
+            const projX = x1 + t * (x2 - x1);
+            const projY = y1 + t * (y2 - y1);
+            return Math.hypot(px - projX, py - projY);
+        }
+
+        function drawChart(canvasId, dataPoints, unit, label) {
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            const width = ctx.canvas.width;
+            const height = ctx.canvas.height;
+            const padding = 40;
+
+            // Clear
+            ctx.clearRect(0, 0, width, height);
+
+            // Axis
+            ctx.beginPath();
+            ctx.moveTo(padding, padding);
+            ctx.lineTo(padding, height - padding);
+            ctx.lineTo(width - padding, height - padding);
+            ctx.strokeStyle = "#ccc";
+            ctx.stroke();
+
+            // X Labels (Stages)
+            ctx.fillStyle = "#666";
+            ctx.font = "12px sans-serif";
+            ctx.textAlign = "center";
+            for (let i = 0; i < dataPoints.length; i++) {
+                const x = padding + (i * ((width - 2 * padding) / (dataPoints.length - 1)));
+                ctx.fillText(`S${i + 1}`, x, height - padding + 15);
+            }
+
+            // Title
+            ctx.font = "bold 14px sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText(label, width / 2, 20);
+
+            const maxVal = Math.max(...dataPoints, 10); // Cap at 10 or max
+
+            ctx.beginPath();
+            ctx.strokeStyle = "#FF3B30";
+            ctx.lineWidth = 3;
+
+            const getX = (i) => padding + (i * ((width - 2 * padding) / (dataPoints.length - 1)));
+            const getY = (val) => (height - padding) - (val / maxVal) * (height - 2 * padding);
+
+            ctx.moveTo(getX(0), getY(dataPoints[0]));
+
+            for (let i = 1; i < dataPoints.length; i++) {
+                ctx.lineTo(getX(i), getY(dataPoints[i]));
+            }
+            ctx.stroke();
+
+            // Dots
+            ctx.fillStyle = "#FF3B30";
+            for (let i = 0; i < dataPoints.length; i++) {
+                ctx.beginPath();
+                ctx.arc(getX(i), getY(dataPoints[i]), 5, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Label Value
+                ctx.fillStyle = "#000";
+                ctx.font = "10px sans-serif";
+                ctx.fillText(dataPoints[i].toFixed(1) + unit, getX(i), getY(dataPoints[i]) - 10);
+                ctx.fillStyle = "#FF3B30";
+            }
+        }
+
+        function drawGeometricChart(canvasId, data) {
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            const width = ctx.canvas.width;
+            const height = ctx.canvas.height;
+            const padding = 40;
+
+            ctx.clearRect(0, 0, width, height);
+
+            // Axis
+            ctx.beginPath();
+            ctx.moveTo(padding, padding);
+            ctx.lineTo(padding, height - padding);
+            ctx.lineTo(width - padding, height - padding);
+            ctx.strokeStyle = "#ccc";
+            ctx.stroke();
+
+            // Labels
+            ctx.fillStyle = "#666";
+            ctx.font = "12px sans-serif";
+            ctx.textAlign = "center";
+            for (let i = 0; i < data.length; i++) {
+                const x = padding + (i * ((width - 2 * padding) / (data.length - 1)));
+                ctx.fillText(`S${i + 1}`, x, height - padding + 15);
+            }
+
+            // Title
+            ctx.font = "bold 14px sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText("Geometric Error (px)", width / 2, 20);
+
+            const maxVal = Math.max(...data.map(d => d.max), 50);
+
+            const getX = (i) => padding + (i * ((width - 2 * padding) / (data.length - 1)));
+            const getY = (val) => (height - padding) - (val / maxVal) * (height - 2 * padding);
+
+            // Draw Max (Light Red)
+            ctx.beginPath();
+            ctx.strokeStyle = "rgba(255, 59, 48, 0.4)";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.moveTo(getX(0), getY(data[0].max));
+            for (let i = 1; i < data.length; i++) ctx.lineTo(getX(i), getY(data[i].max));
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Draw Avg (Blue)
+            ctx.beginPath();
+            ctx.strokeStyle = "#007AFF";
+            ctx.lineWidth = 3;
+            ctx.moveTo(getX(0), getY(data[0].avg));
+            for (let i = 1; i < data.length; i++) ctx.lineTo(getX(i), getY(data[i].avg));
+            ctx.stroke();
+
+            // Dots & Labels
+            ctx.textAlign = "center";
+            for (let i = 0; i < data.length; i++) {
+                // Avg (Blue Dots) - Label BELOW
+                ctx.beginPath();
+                ctx.fillStyle = "#007AFF";
+                ctx.arc(getX(i), getY(data[i].avg), 5, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = "#007AFF";
+                ctx.font = "bold 11px sans-serif";
+                // Move Avg label well below the point
+                ctx.fillText(data[i].avg.toFixed(1), getX(i), getY(data[i].avg) + 20);
+
+                // Max (Red Dashed) - Label ABOVE
+                // Only show Max label if it's significantly different from Avg to avoid clutter?
+                // Or just put it high up.
+                ctx.fillStyle = "#FF3B30";
+                ctx.font = "10px sans-serif";
+                // Move Max label well above the point
+                ctx.fillText("Max: " + data[i].max.toFixed(0), getX(i), getY(data[i].max) - 10);
+            }
+
+            // Legend (Top Left)
+            ctx.textAlign = "left";
+            ctx.fillStyle = "#007AFF";
+            ctx.fillText("● Avg Deviation", padding + 10, 40);
+            ctx.fillStyle = "#FF3B30";
+            ctx.fillText("- - Max Deviation", padding + 10, 55);
+        }
+
+
+
+        function downloadCSV() {
+            const rawData = localStorage.getItem('visuomotor_experiment_data');
+            if (!rawData) return;
+
+            let dataLogs = [];
+            try {
+                const parsed = JSON.parse(rawData);
+                if (Array.isArray(parsed)) {
+                    dataLogs = parsed;
+                } else {
+                    dataLogs = parsed.logs;
+                }
+            } catch (e) { return; }
+
+            if (dataLogs.length === 0) return;
+
+            let csv = "timestamp,stage,mode,strokeId,realX,realY,drawX,drawY,pressure\n";
+            dataLogs.forEach(row => {
+                csv += `${row.timestamp},${row.stage},${row.mode},${row.strokeId},${row.realX},${row.realY},${row.drawX},${row.drawY},${row.pressure}\n`;
+            });
+            const blob = new Blob([csv], { type: "text/csv" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `experiment_data_${Date.now()}.csv`;
+            link.click();
+        }
+
+        document.getElementById('downloadBtn').addEventListener('click', downloadCSV);
+
+        window.addEventListener('load', init);
+
+    </script>
+</body>
+
+</html>
